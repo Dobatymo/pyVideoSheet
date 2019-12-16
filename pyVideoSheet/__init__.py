@@ -1,3 +1,5 @@
+from future import division
+
 from subprocess import Popen, PIPE, STDOUT
 from PIL import Image, ImageDraw, ImageFont
 import StringIO
@@ -5,7 +7,8 @@ import re
 import os
 from decimal import Decimal
 
-class Video:
+class Video(object):
+
     def __init__(self,filename):
         self.filename = filename
         self.filesize = self.getFileSize()
@@ -21,7 +24,7 @@ class Video:
         return os.stat(self.filename).st_size / 1048576.0
 
     def getVideoDuration(self):
-        p = Popen(["ffmpeg","-i",self.filename],stdout=PIPE, stderr=STDOUT)
+        p = Popen(["ffmpeg", "-i", self.filename], stdout=PIPE, stderr=STDOUT)
         pout = p.communicate()
         matches = re.search(r"Duration:\s{1}(?P<hours>\d+?):(?P<minutes>\d+?):(?P<seconds>\d+\.\d+?),", pout[0], re.DOTALL).groupdict()
         hours = Decimal(matches['hours'])
@@ -41,13 +44,13 @@ class Video:
         return img
 
     def makeThumbnails(self,interval):
-        totalThumbs = self.duration//interval
+        totalThumbs = self.duration // interval
         thumbsList = []
         seektime = 0
-        for n in range(0,totalThumbs):
+        for n in range(0, totalThumbs):
             seektime += interval
             img = self.getFrameAt(seektime)
-            if img!=None:
+            if img is not None:
                 thumbsList.append(img)
         self.thumbnails = thumbsList
         self.thumbcount = len(thumbsList)
@@ -65,12 +68,13 @@ class Video:
         hours = int(seconds // 3600)
         minutes = int((seconds % 3600) // 60)
         seconds = int(seconds % 60)
-        timestring = `hours`+":"+`minutes`+":"+`seconds`
+        timestring = "{}:{}:{}".format(hours, minutes, seconds)
         return timestring
 
-class Sheet:
+class Sheet(object):
+
     def __init__(self, video):
-        fontfile = os.path.join(os.path.dirname(os.path.abspath(__file__)),"Cabin-Regular-TTF.ttf")
+        fontfile = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Cabin-Regular-TTF.ttf")
         self.font = ImageFont.truetype(fontfile, 15)
         self.backgroundColour = (0,0,0,0)
         self.textColour = (255,255,255,0)
@@ -101,7 +105,7 @@ class Sheet:
 
     def makeGrid(self):
         column = self.gridColumn
-        row = self.video.thumbcount//column
+        row = self.video.thumbcount // column
         if (self.video.thumbcount % column) > 0:
             row += 1
         width = self.video.thumbsize[0]
@@ -109,9 +113,9 @@ class Sheet:
         grid = Image.new(self.video.mode,(width*column,height*row))
         d = ImageDraw.Draw(grid)
         seektime = 0
-        for j in range(0,row):
-            for i in range(0,column):
-                if j*column+i >= self.video.thumbcount:
+        for j in range(0, row):
+            for i in range(0, column):
+                if j*column + i >= self.video.thumbcount:
                     break
                 grid.paste(self.video.thumbnails[j*column+i],(width*i,height*j))
                 if self.timestamp==True:
@@ -128,14 +132,14 @@ class Sheet:
         hours = duration // 3600
         minutes = (duration % 3600) // 60
         seconds = duration % 60
-        timestring = ("{:4n}".format(hours))+":"+("{:2n}".format(minutes))+":"+("{:2n}".format(seconds))
+        timestring = ("{:4n}".format(hours)) + ":" + ("{:2n}".format(minutes)) + ":" + ("{:2n}".format(seconds))
 
         header = Image.new(self.grid.mode, (self.grid.width,self.headerSize), self.backgroundColour)
         d = ImageDraw.Draw(header)
-        d.text((10,10), "File Name: "+os.path.basename(self.video.filename), font=self.font,fill=self.textColour)
-        d.text((10,30), "File Size: "+("{:10.6f}".format(self.video.filesize))+" MB", font=self.font,fill=self.textColour)
-        d.text((10,50), "Resolution: "+`width`+"x"+`height`, font=self.font,fill=self.textColour)
-        d.text((10,70), "Duration: "+timestring, font=self.font,fill=self.textColour)
+        d.text((10,10), "File Name: {}".format(os.path.basename(self.video.filename)), font=self.font, fill=self.textColour)
+        d.text((10,30), "File Size: {:10.6f} MB".format(self.video.filesize), font=self.font, fill=self.textColour)
+        d.text((10,50), "Resolution: {}x{}".format(width, height), font=self.font, fill=self.textColour)
+        d.text((10,70), "Duration: {}".format(timestring), font=self.font, fill=self.textColour)
         self.header = header
         return header
 
@@ -145,12 +149,12 @@ class Sheet:
         self.video.shrinkThumbs(self.maxThumbSize)
         self.makeGrid()
         self.makeHeader()
-        self.sheet = Image.new(self.grid.mode,(self.grid.width,self.grid.height+self.header.height))
+        self.sheet = Image.new(self.grid.mode,(self.grid.width, self.grid.height + self.header.height))
         self.sheet.paste(self.header,(0,0))
         self.sheet.paste(self.grid,(0,self.header.height))
         return self.sheet
 
-    def makeSheetByNumber(self,numOfThumbs):
-        interval = (self.video.duration/numOfThumbs)
+    def makeSheetByNumber(self, numOfThumbs):
+        interval = (self.video.duration / numOfThumbs)
         self.vid_interval = interval
         return self.makeSheetByInterval(interval)
