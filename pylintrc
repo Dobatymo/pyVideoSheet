@@ -1,0 +1,8 @@
+﻿[MASTER]
+jobs=4
+
+[FORMAT]
+max-line-length=120
+
+[MESSAGES CONTROL]
+disable=missing-docstring,bad-continuation,multiple-imports,useless-object-inheritance,too-many-instance-attributes,invalid-name
