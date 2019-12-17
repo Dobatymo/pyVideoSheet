@@ -15,5 +15,8 @@ setup(
     url='https://github.com/rorasa/pyVideoSheet',
     license='MPL 2.0',
     python_requires=">=2.7",
+    install_requires=[
+        "genutility",
+    ],
     use_2to3=False,
 )

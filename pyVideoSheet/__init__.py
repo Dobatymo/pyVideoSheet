@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division
+from __future__ import absolute_import, division, print_function
 
 import re, os
 from subprocess import Popen, PIPE, STDOUT
@@ -14,20 +14,27 @@ if TYPE_CHECKING:
 def get_time_string(seconds):
     # type: (int, ) -> str
 
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    seconds = seconds % 60
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
 
-    return "{}:{}:{}".format(hours, minutes, seconds)
+    return "{:02}:{:02}:{:02}".format(hours, minutes, seconds)
+
+def get_file_size_mb(filename):
+    # type: (str, ) -> float
+
+    return os.stat(filename).st_size / 1024**2
+
+class InvalidVideoFile(Exception):
+    pass
 
 class Video(object):
 
     def __init__(self, filename, ffmpeg="ffmpeg"):
-        # type: (str, ) -> None
+        # type: (str, str) -> None
 
         self.filename = filename
         self.ffmpeg = ffmpeg
-        self.filesize = self.get_file_size()
+        self.filesize = get_file_size_mb(filename)
         try:
             example = self.get_frame_at(0)
         except OSError:
@@ -39,15 +46,11 @@ class Video(object):
         self.thumbnails = [] # type: List[Image]
         self.thumbsize = self.resolution
 
-    def get_file_size(self):
-        # type: () -> float
-
-        return os.stat(self.filename).st_size / 1048576.
-
     def get_video_duration(self):
         # type: () -> int
 
-        p = Popen([self.ffmpeg, "-i", self.filename], stdout=PIPE, stderr=STDOUT)
+        cmd = [self.ffmpeg, "-i", self.filename]
+        p = Popen(cmd, stdout=PIPE, stderr=STDOUT)
         pout = p.communicate()
         match = re.search(br"Duration:\s{1}(?P<hours>\d+?):(?P<minutes>\d+?):(?P<seconds>\d+\.\d+?),",
             pout[0], re.DOTALL)
@@ -55,9 +58,9 @@ class Video(object):
             raise RuntimeError("could extract video duration")
 
         matches = match.groupdict()
-        hours = int(matches['hours'])
-        minutes = int(matches['minutes'])
-        seconds = int(float(matches['seconds']))
+        hours = int(matches["hours"])
+        minutes = int(matches["minutes"])
+        seconds = int(float(matches["seconds"]))
         duration = 3600 * hours + 60 * minutes + seconds
 
         return duration
@@ -68,87 +71,66 @@ class Video(object):
         timestring = get_time_string(seektime)
         cmd = [self.ffmpeg, "-ss", timestring, "-i", self.filename, "-f", "image2", "-frames:v",
             "1", "-c:v", "png", "-loglevel", "8", "-"]
-        print(" ".join(cmd))
         p = Popen(cmd, stdout=PIPE)
         pout = p.communicate()
-        assert pout[0]
+        if not pout[0]:
+            raise InvalidVideoFile(" ".join(cmd))
+
         return Image.open(BytesIO(pout[0]))
 
     def make_thumbnails(self, interval):
-        # type: (int, ) -> List[Image]
+        # type: (int, ) -> None
 
-        total_thumbs = self.duration // interval
         thumbs_list = []
-        seektime = 0
-        for _ in range(0, total_thumbs):
-            seektime += interval
-            try:
-                img = self.get_frame_at(seektime)
-                thumbs_list.append(img)
-            except OSError:
-                pass
+        for seektime in range(0, self.duration, interval):
+            img = self.get_frame_at(seektime)
+            thumbs_list.append(img)
 
         self.thumbnails = thumbs_list
 
-        return thumbs_list
-
     def shrink_thumbs(self, maxsize):
-        # type: (Tuple[int, int], ) -> Optional[List[Image]]
+        # type: (Tuple[int, int], ) -> None
 
         if not self.thumbnails:
-            return None
+            return
 
         for thumbnail in self.thumbnails:
             thumbnail.thumbnail(maxsize)
-        self.thumbsize = self.thumbnails[0].size
 
-        return self.thumbnails
+        self.thumbsize = self.thumbnails[0].size
 
 class Sheet(object):
 
-    def __init__(self, video):
-        # type: (Video, ) -> None
-
-        fontfile = pkg_resources.resource_stream('pyVideoSheet', 'data/Cabin-Regular-TTF.ttf')
-        self.font = ImageFont.truetype(fontfile, 15)
-        self.background_colour = (0, 0, 0, 0)
-        self.text_colour = (255, 255, 255, 0)
-        self.header_size = 100
-        self.grid_column = 5
-        self.max_thumb_size = (220, 220)
-        self.timestamp = True
-        self.vid_interval = None # type: Optional[int]
-        self.grid = None
-        self.header = None
-        self.sheet = None
+    def __init__(self, video, columns=5, timestamp=True, background_colour=(0, 0, 0, 0),
+        text_colour=(255, 255, 255, 0), max_thumb_size=(220, 220)
+    ):
+        # type: (Video, int, bool) -> None
 
         self.video = video
+        self.grid_column = columns
+        self.timestamp = timestamp
+        self.background_colour = background_colour
+        self.text_colour = text_colour
+        self.max_thumb_size = max_thumb_size
+
+        self.header_size = 100
+
+        fontfile = pkg_resources.resource_stream("pyVideoSheet", "data/Cabin-Regular-TTF.ttf")
+        self.font = ImageFont.truetype(fontfile, 15)
+        self.vid_interval = None # type: Optional[int]
 
     def set_property(self, prop, value):
         # type: (str, Any) -> None
 
-        if prop == 'font':
+        if prop == "font":
             self.font = ImageFont.truetype(value[0], value[1])
-        elif prop == 'background_colour':
-            self.background_colour = value
-        elif prop == 'text_colour':
-            self.text_colour = value
-        elif prop == 'header_size':
+        elif prop == "header_size":
             self.header_size = value
-        elif prop == 'grid_column':
-            self.grid_column = value
-        elif prop == 'max_thumb_size':
-            self.max_thumb_size = value
-        elif prop == 'timestamp':
-            self.timestamp = value
         else:
-            raise Exception('Invalid Sheet property')
+            raise Exception("Invalid Sheet property")
 
-    def make_grid(self):
-        # type: () -> Image
-
-        if not self.vid_interval:
-            raise RuntimeError("make_grid called before setup")
+    def make_grid(self, interval):
+        # type: (int, ) -> Image
 
         column = self.grid_column
         thumbcount = len(self.video.thumbnails)
@@ -166,27 +148,20 @@ class Sheet(object):
                     break
                 grid.paste(self.video.thumbnails[j * column + i], (width * i, height * j))
                 if self.timestamp is True:
-                    seektime += self.vid_interval
                     ts = get_time_string(seektime)
                     d.text((width * i, height * j), ts, font=self.font, fill=self.text_colour)
-        self.grid = grid
+                    seektime += interval
+
         return grid
 
-    def make_header(self):
+    def make_header(self, mode, width):
         # type: () -> Image
 
         width = self.video.resolution[0]
         height = self.video.resolution[1]
-        duration = self.video.duration
-        hours = duration // 3600
-        minutes = (duration % 3600) // 60
-        seconds = duration % 60
-        timestring = "{:4n}:{:2n}:{:2n}".format(hours, minutes, seconds)
+        timestring = get_time_string(self.video.duration)
 
-        if not self.grid:
-            raise RuntimeError("called make_header before setup")
-
-        header = Image.new(self.grid.mode, (self.grid.width, self.header_size), self.background_colour)
+        header = Image.new(mode, (width, self.header_size), self.background_colour)
         d = ImageDraw.Draw(header)
 
         d.text((10, 10), "File Name: {}".format(os.path.basename(self.video.filename)),
@@ -198,27 +173,24 @@ class Sheet(object):
         d.text((10, 70), "Duration: {}".format(timestring),
             font=self.font, fill=self.text_colour)
 
-        self.header = header
         return header
 
     def make_sheet_by_interval(self, interval):
         # type: (int, ) -> Image
 
-        self.vid_interval = interval
         self.video.make_thumbnails(interval)
         self.video.shrink_thumbs(self.max_thumb_size)
-        self.make_grid()
-        self.make_header()
-        self.sheet = Image.new(self.grid.mode, (self.grid.width, self.grid.height + self.header.height))
-        self.sheet.paste(self.header, (0, 0))
-        self.sheet.paste(self.grid, (0, self.header.height))
+        grid = self.make_grid(interval)
+        header = self.make_header(grid.mode, grid.width)
+        sheet = Image.new(grid.mode, (grid.width, grid.height + header.height))
+        sheet.paste(header, (0, 0))
+        sheet.paste(grid, (0, header.height))
 
-        return self.sheet
+        return sheet
 
     def make_sheet_by_number(self, num_of_thumbs):
         # type: (int, ) -> Image
 
-        interval = self.video.duration // num_of_thumbs
-        self.vid_interval = interval
+        interval = self.video.duration // (num_of_thumbs - 1)
 
         return self.make_sheet_by_interval(interval)
